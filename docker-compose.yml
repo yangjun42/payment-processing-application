@@ -1,0 +1,80 @@
+name: payment-processing-application
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  payment-simulator:
+    build: .
+    command: ["--spring.profiles.active=simulator"]
+    environment:
+      SERVER_PORT: 8081
+      PAYMENT_SIMULATOR_MIN_DELAY: PT0.01S
+      PAYMENT_SIMULATOR_MAX_DELAY: PT0.25S
+      PAYMENT_SIMULATOR_TECHNICAL_FAILURE_RATE: "0.0"
+      PAYMENT_SIMULATOR_BUSINESS_DECLINE_RATE: "0.0"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  payment-app:
+    build: .
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payments
+      SPRING_DATASOURCE_USERNAME: payments
+      SPRING_DATASOURCE_PASSWORD: payments
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      PAYMENT_SERVICE_BASE_URL: http://payment-simulator:8081
+      PAYMENT_MAX_ATTEMPTS: 3
+      PAYMENT_INITIAL_BACKOFF: PT1S
+      PAYMENT_MAX_BACKOFF: PT10S
+      PAYMENT_STALE_IN_PROGRESS_AFTER: PT15S
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      payment-simulator:
+        condition: service_started
+
+  payment-gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      payment-app:
+        condition: service_started
