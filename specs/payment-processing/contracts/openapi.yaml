@@ -1,0 +1,185 @@
+openapi: 3.0.3
+info:
+  title: Payment Processing Application API
+  version: 0.1.0
+  description: Asynchronous payment intake and status API.
+servers:
+  - url: http://localhost:8080
+paths:
+  /payments:
+    post:
+      summary: Accept a payment for asynchronous processing
+      operationId: createPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreateRequest'
+      responses:
+        '202':
+          description: Payment accepted
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          description: Invalid request
+        '409':
+          description: Idempotency key conflict
+  /payments/{paymentId}:
+    get:
+      summary: Get payment status
+      operationId: getPayment
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Payment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '404':
+          description: Payment not found
+  /payments/{paymentId}/attempts:
+    get:
+      summary: Get payment attempt history
+      operationId: getPaymentAttempts
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Attempt history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentAttemptResponse'
+        '404':
+          description: Payment not found
+components:
+  parameters:
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    PaymentCreateRequest:
+      type: object
+      required:
+        - amount
+        - currency
+        - reference
+      properties:
+        amount:
+          type: number
+          minimum: 0.01
+          example: 12.50
+        currency:
+          type: string
+          minLength: 1
+          example: EUR
+        reference:
+          type: string
+          minLength: 1
+          example: INV-100
+        idempotencyKey:
+          type: string
+          example: client-key-100
+    PaymentResponse:
+      type: object
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/PaymentState'
+        amount:
+          type: number
+        currency:
+          type: string
+        reference:
+          type: string
+        idempotencyKey:
+          type: string
+          nullable: true
+        attemptCount:
+          type: integer
+        maxAttempts:
+          type: integer
+        nextRetryAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          type: string
+          nullable: true
+        paymentServiceResponseId:
+          type: string
+          nullable: true
+        paymentServiceStatus:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        statusUrl:
+          type: string
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentAttemptResponse'
+    PaymentAttemptResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        attemptNumber:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        result:
+          type: string
+          enum: [SUCCESS, TECHNICAL_FAILURE, BUSINESS_FAILURE]
+          nullable: true
+        httpStatus:
+          type: integer
+          nullable: true
+        durationMs:
+          type: integer
+          format: int64
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+    PaymentState:
+      type: string
+      enum:
+        - RECEIVED
+        - ENQUEUED
+        - IN_PROGRESS
+        - RETRY_PENDING
+        - COMPLETED
+        - FAILED
